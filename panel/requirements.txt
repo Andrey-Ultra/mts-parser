@@ -1,0 +1,5 @@
+fastapi
+uvicorn
+requests
+docker
+simple-task-manager-client @ https://github.com/Andrey-Ultra/simple-task-manager/archive/refs/heads/main.zip#subdirectory=python

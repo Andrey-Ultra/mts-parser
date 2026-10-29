@@ -1,0 +1,48 @@
+name: mts-parser
+
+services:
+  panel:
+    build: ./panel
+    ports:
+      - "8000:8000"
+    environment:
+      - STM_URL=http://stm:8080
+      - PROXY_GIVER_URL=http://proxy-giver:9000
+      - WORKER_IMAGE=mts-parser-worker
+      - WORKER_NETWORK=mts-parser
+      - DATA_DIR=/data
+      - TZ=Europe/Moscow  # время в логах воркеров и имени CSV
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock  # панель создаёт и удаляет контейнеры воркеров
+      - panel-data:/data
+    depends_on:
+      - stm
+      - proxy-giver
+    restart: unless-stopped
+
+  stm:
+    build: https://github.com/Andrey-Ultra/simple-task-manager.git
+    environment:
+      - TASK_TIMEOUT=600
+    restart: unless-stopped  # порт наружу не нужен: панель и воркеры ходят по сети mts-parser
+
+  proxy-giver:
+    build: ./proxy-giver
+    container_name: proxy_giver_api
+    ports:
+      - "9001:9000"
+    restart: unless-stopped
+
+  # Только сборка образа: контейнеры воркеров создаются и удаляются из панели
+  worker:
+    build: ./worker
+    image: mts-parser-worker
+    deploy:
+      replicas: 0
+
+networks:
+  default:
+    name: mts-parser
+
+volumes:
+  panel-data:

@@ -1,0 +1,391 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>МТС parser</title>
+<style>
+  :root {
+    --bg: #f5f6f8; --card: #fff; --text: #1d2129; --muted: #6b7280; --border: #e2e5ea;
+    --accent: #2563eb; --ok: #15803d; --info: #1d4ed8; --warn: #b45309; --err: #b91c1c;
+    --code-bg: #111827; --code-text: #e5e7eb;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1115; --card: #171a21; --text: #e6e8eb; --muted: #9aa3af; --border: #2a2f3a;
+      --accent: #3b82f6; --ok: #4ade80; --info: #60a5fa; --warn: #fbbf24; --err: #f87171;
+      --code-bg: #0b0d12;
+    }
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  header, .alert, main { max-width: 1200px; margin: 0 auto; padding-left: 16px; padding-right: 16px; }
+  header { padding-top: 20px; padding-bottom: 12px; display: flex; align-items: baseline; gap: 12px; }
+  h1 { font-size: 20px; margin: 0; }
+  .muted { color: var(--muted); }
+  .alert > div { background: var(--card); border: 1px solid var(--border); border-left: 3px solid var(--err);
+                 color: var(--err); border-radius: 8px; padding: 8px 12px; margin-bottom: 12px; }
+  main { padding-bottom: 40px; display: grid; gap: 16px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  @media (max-width: 860px) { main { grid-template-columns: minmax(0, 1fr); } }
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 16px; min-width: 0; }
+  .wide { grid-column: 1 / -1; }
+  h2 { font-size: 15px; margin: 0 0 10px; display: flex; align-items: center; gap: 8px; }
+  .pill { font-size: 12px; font-weight: 500; color: var(--muted); border: 1px solid var(--border);
+          border-radius: 999px; padding: 0 8px; }
+  textarea { width: 100%; min-height: 160px; resize: vertical; background: var(--bg); color: var(--text);
+             border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px;
+             font: 12.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  h3 { font-size: 13px; font-weight: 600; margin: 0 0 6px; display: flex; align-items: center; gap: 8px; }
+  h3 .saved { font-weight: 400; font-size: 12px; }
+  .row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; }
+  .spacer { flex: 1; }
+  button, .btn { font: inherit; cursor: pointer; border-radius: 7px; padding: 6px 12px; text-decoration: none;
+                 border: 1px solid var(--border); background: var(--card); color: var(--text); }
+  .primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .danger { color: var(--err); }
+  .small { padding: 2px 8px; font-size: 12px; }
+  button:disabled { opacity: .5; cursor: default; }
+  .msg { font-size: 13px; }
+  .msg.ok { color: var(--ok); }
+  .msg.err { color: var(--err); }
+  table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  th { font-size: 12px; font-weight: 500; color: var(--muted); }
+  .num { text-align: right; font-variant-numeric: tabular-nums; }
+  .url { max-width: 0; width: 70%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .url a { color: inherit; }
+  .actions { text-align: right; white-space: nowrap; }
+  .actions button + button { margin-left: 6px; }
+  tr.selected td { background: var(--bg); }
+  .empty { color: var(--muted); padding-top: 12px; }
+  .badge { display: inline-block; font-size: 12px; padding: 0 8px; border-radius: 999px;
+           border: 1px solid currentColor; white-space: nowrap; }
+  .ok { color: var(--ok); } .info { color: var(--info); } .warn { color: var(--warn); } .err { color: var(--err); }
+  .badge.muted { color: var(--muted); }
+  .bar { flex: 0 1 200px; height: 6px; background: var(--bg); border: 1px solid var(--border);
+         border-radius: 999px; overflow: hidden; }
+  .bar > div { height: 100%; width: 0; background: var(--ok); transition: width .3s; }
+  #logs { margin: 0; height: 420px; overflow: auto; background: var(--code-bg); color: var(--code-text);
+          border-radius: 8px; padding: 10px 12px; white-space: pre-wrap; word-break: break-word;
+          font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; }
+</style>
+</head>
+<body>
+<header>
+  <h1>МТС parser</h1>
+  <span class="muted">прокси · задачи · воркеры</span>
+</header>
+<div class="alert"><div id="queue-error" hidden></div></div>
+
+<main>
+  <section class="card">
+    <h2>Прокси <span class="pill" id="proxy-count">0</span></h2>
+    <textarea id="proxy-text" spellcheck="false"
+              placeholder="ip:port:login:password — по одному на строку"></textarea>
+    <div class="row">
+      <button class="primary" id="proxy-save">Обновить список</button>
+      <span class="msg" id="proxy-msg"></span>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Воркеры <span class="pill" id="worker-count">0</span></h2>
+    <div class="row" style="margin-top:0">
+      <button class="primary" id="worker-create">Создать воркер</button>
+      <span class="msg" id="worker-msg"></span>
+    </div>
+    <table>
+      <thead><tr><th>Имя</th><th>Статус</th><th>Создан</th><th></th></tr></thead>
+      <tbody id="worker-rows"></tbody>
+    </table>
+    <div class="empty" id="worker-empty">Воркеров нет. Каждый воркер — отдельный контейнер с браузером.</div>
+  </section>
+
+  <section class="card wide" id="logs-card" hidden>
+    <h2>Логи <span id="logs-title"></span>
+      <span class="spacer"></span>
+      <button class="small" id="logs-close">Закрыть</button>
+    </h2>
+    <pre id="logs"></pre>
+  </section>
+
+  <section class="card wide">
+    <h2>Задачи <span class="pill" id="task-count">0</span></h2>
+    <h3>Ссылки <span class="pill" id="list-count">0</span> <span class="muted saved" id="list-saved"></span></h3>
+    <textarea id="list-text" spellcheck="false"
+              placeholder="https://shop.mts.ru/catalog/… — по одной ссылке на строку"></textarea>
+    <div class="row">
+      <button class="primary" id="list-send">Отправить на выполнение</button>
+      <span class="msg" id="list-msg"></span>
+    </div>
+    <div class="row">
+      <a class="btn" id="csv" href="/api/results.csv" download>Скачать CSV</a>
+      <span class="spacer"></span>
+      <span class="muted" id="task-progress"></span>
+      <div class="bar"><div id="task-bar"></div></div>
+    </div>
+    <table>
+      <thead><tr><th>Ссылка</th><th>Статус</th><th class="num">Товаров</th></tr></thead>
+      <tbody id="task-rows"></tbody>
+    </table>
+    <div class="empty" id="task-empty">Задач нет.</div>
+  </section>
+</main>
+
+<script>
+const $ = (s) => document.querySelector(s);
+
+const TASK_STATUS = {
+  "in queue": ["в очереди", "muted"],
+  "in work": ["в работе", "info"],
+  "done": ["готово", "ok"],
+  "error": ["ошибка ответа", "err"],
+};
+const WORKER_STATUS = {
+  running: ["работает", "ok"],
+  restarting: ["перезапускается", "warn"],
+  created: ["создан", "muted"],
+  paused: ["на паузе", "muted"],
+  exited: ["остановлен", "err"],
+  dead: ["упал", "err"],
+};
+
+async function api(method, url, body) {
+  const opts = { method };
+  if (body !== undefined) {
+    opts.headers = { "Content-Type": "application/json" };
+    opts.body = JSON.stringify(body);
+  }
+  const r = await fetch(url, opts);
+  const isJson = (r.headers.get("content-type") || "").includes("application/json");
+  const data = isJson ? await r.json() : await r.text();
+  if (!r.ok) {
+    const detail = isJson && data.detail;
+    throw new Error(typeof detail === "string" ? detail : detail ? JSON.stringify(detail) : `${r.status} ${r.statusText}`);
+  }
+  return data;
+}
+
+function flash(el, text, kind = "ok") {
+  el.textContent = text;
+  el.className = "msg " + kind;
+  clearTimeout(el._timer);
+  if (kind === "ok") el._timer = setTimeout(() => { el.textContent = ""; }, 5000);
+}
+
+function cell(content, cls) {
+  const td = document.createElement("td");
+  if (cls) td.className = cls;
+  td.append(content);
+  return td;
+}
+
+function badge([label, kind]) {
+  const span = document.createElement("span");
+  span.className = "badge " + kind;
+  span.textContent = label;
+  return span;
+}
+
+function button(label, onclick, cls = "small") {
+  const b = document.createElement("button");
+  b.className = cls;
+  b.textContent = label;
+  b.onclick = onclick;
+  return b;
+}
+
+// Перерисовываем только при изменении данных, иначе клик по кнопке в таблице может «провалиться»
+const lastRender = {};
+function changed(name, data) {
+  const key = JSON.stringify(data);
+  if (lastRender[name] === key) return false;
+  lastRender[name] = key;
+  return true;
+}
+
+async function withButton(btn, fn) {
+  btn.disabled = true;
+  try { await fn(); } finally { btn.disabled = false; }
+}
+
+// ------------ ПРОКСИ ------------
+
+function showProxies(list) {
+  $("#proxy-text").value = list.join("\n");
+  $("#proxy-count").textContent = list.length;
+}
+
+async function loadProxies() {
+  try { showProxies((await api("GET", "/api/proxies")).proxies); }
+  catch (e) { flash($("#proxy-msg"), e.message, "err"); }
+}
+
+$("#proxy-save").onclick = () => withButton($("#proxy-save"), async () => {
+  try {
+    const d = await api("PUT", "/api/proxies", { text: $("#proxy-text").value });
+    showProxies(d.proxies);
+    flash($("#proxy-msg"), `Добавлено: ${d.added}, удалено: ${d.removed}`);
+  } catch (e) { flash($("#proxy-msg"), e.message, "err"); }
+});
+
+// ------------ ЗАДАЧИ ------------
+
+function renderTasks(d) {
+  if (!changed("tasks", d)) return;
+  const rows = d.tasks.map((t) => {
+    const a = document.createElement("a");
+    a.href = t.url;
+    a.target = "_blank";
+    a.rel = "noopener";
+    a.title = t.url;
+    a.textContent = t.url.replace(/^https?:\/\/(www\.)?/, "");
+    const tr = document.createElement("tr");
+    tr.append(cell(a, "url"), cell(badge(TASK_STATUS[t.status] || [t.status, "muted"])), cell(t.count ?? "—", "num"));
+    return tr;
+  });
+  $("#task-rows").replaceChildren(...rows);
+  $("#task-empty").hidden = d.total > 0;
+  $("#task-count").textContent = d.total;
+  $("#task-progress").textContent = d.total ? `готово ${d.done} из ${d.total}` : "";
+  $("#task-bar").style.width = d.total ? `${(100 * d.done) / d.total}%` : "0";
+  $("#csv").textContent = d.total && d.done === d.total ? "Скачать CSV" : "Скачать CSV (что готово)";
+}
+
+async function refreshTasks() {
+  const banner = $("#queue-error");
+  try {
+    const d = await api("GET", "/api/tasks");
+    renderTasks(d);
+    banner.textContent = d.queue_error || "";
+    banner.hidden = !d.queue_error;
+  } catch (e) {
+    banner.textContent = "Панель недоступна: " + e.message;
+    banner.hidden = false;
+  }
+}
+
+// Текст списка ссылок сохраняется на сервере, поэтому переживает обновление страницы
+const countLines = (text) => text.split(/\r?\n/).filter((line) => line.trim()).length;
+const updateListCount = () => { $("#list-count").textContent = countLines($("#list-text").value); };
+let listTimer;
+
+async function saveList() {
+  clearTimeout(listTimer);
+  try {
+    await api("PUT", "/api/list", { text: $("#list-text").value });
+    $("#list-saved").textContent = "сохранено";
+  } catch (e) { $("#list-saved").textContent = ""; flash($("#list-msg"), "Не сохранилось: " + e.message, "err"); }
+}
+
+$("#list-text").oninput = () => {
+  updateListCount();
+  $("#list-saved").textContent = "…";
+  clearTimeout(listTimer);
+  listTimer = setTimeout(saveList, 500);
+};
+
+$("#list-send").onclick = () => withButton($("#list-send"), async () => {
+  const hasTasks = $("#task-rows").children.length > 0;
+  if (hasTasks && !confirm("Текущие задачи и их результаты будут удалены. Отправить новый список?")) return;
+  try {
+    const d = await api("POST", "/api/tasks", { text: $("#list-text").value });
+    renderTasks(d);
+    flash($("#list-msg"), `Отправлено задач: ${d.total}`);
+  } catch (e) { flash($("#list-msg"), e.message, "err"); }
+});
+
+async function loadList() {
+  try {
+    $("#list-text").value = (await api("GET", "/api/list")).text;
+    updateListCount();
+  } catch (e) { flash($("#list-msg"), e.message, "err"); }
+}
+
+// ------------ ВОРКЕРЫ ------------
+
+let logsFor = null;
+
+async function refreshWorkers() {
+  try {
+    const list = await api("GET", "/api/workers");
+    if (!changed("workers", [list, logsFor])) return;
+    const rows = list.map((w) => {
+      const actions = cell(button("Логи", () => openLogs(w.name)), "actions");
+      actions.append(button("Удалить", () => deleteWorker(w.name), "small danger"));
+      const tr = document.createElement("tr");
+      if (w.name === logsFor) tr.className = "selected";
+      tr.append(
+        cell(w.name),
+        cell(badge(WORKER_STATUS[w.status] || [w.status, "muted"])),
+        cell(new Date(w.created).toLocaleString("ru-RU"), "muted"),
+        actions,
+      );
+      return tr;
+    });
+    $("#worker-rows").replaceChildren(...rows);
+    $("#worker-empty").hidden = list.length > 0;
+    $("#worker-count").textContent = list.length;
+  } catch (e) { flash($("#worker-msg"), e.message, "err"); }
+}
+
+$("#worker-create").onclick = () => withButton($("#worker-create"), async () => {
+  try {
+    const d = await api("POST", "/api/workers");
+    flash($("#worker-msg"), `Создан ${d.name}`);
+    await refreshWorkers();
+  } catch (e) { flash($("#worker-msg"), e.message, "err"); }
+});
+
+async function deleteWorker(name) {
+  if (!confirm(`Удалить ${name}?\nЗадача, которую он сейчас парсит, вернётся в очередь по TASK_TIMEOUT.`)) return;
+  try {
+    await api("DELETE", `/api/workers/${encodeURIComponent(name)}`);
+    flash($("#worker-msg"), `Удалён ${name}`);
+    if (logsFor === name) closeLogs();
+    await refreshWorkers();
+  } catch (e) { flash($("#worker-msg"), e.message, "err"); }
+}
+
+async function loadLogs() {
+  if (!logsFor) return;
+  const pre = $("#logs");
+  const atBottom = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 20;
+  try { pre.textContent = (await api("GET", `/api/workers/${encodeURIComponent(logsFor)}/logs?tail=500`)) || "(пусто)"; }
+  catch (e) { pre.textContent = e.message; }
+  if (atBottom) pre.scrollTop = pre.scrollHeight;
+}
+
+function openLogs(name) {
+  logsFor = name;
+  $("#logs-title").textContent = name;
+  $("#logs").textContent = "Загрузка…";
+  $("#logs-card").hidden = false;
+  $("#logs-card").scrollIntoView({ behavior: "smooth", block: "nearest" });
+  loadLogs();
+  refreshWorkers();
+}
+
+function closeLogs() {
+  logsFor = null;
+  $("#logs-card").hidden = true;
+  refreshWorkers();
+}
+
+$("#logs-close").onclick = closeLogs;
+
+// ------------ СТАРТ ------------
+
+loadProxies();
+loadList();
+refreshTasks();
+refreshWorkers();
+setInterval(refreshTasks, 2000);
+setInterval(refreshWorkers, 3000);
+setInterval(loadLogs, 3000);
+</script>
+</body>
+</html>

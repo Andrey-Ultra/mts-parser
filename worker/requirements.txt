@@ -1,0 +1,7 @@
+camoufox[geoip]==0.5.8
+playwright==1.62.0
+beautifulsoup4
+lxml
+loguru
+requests
+simple-task-manager-client @ git+https://github.com/Andrey-Ultra/simple-task-manager.git#subdirectory=python
